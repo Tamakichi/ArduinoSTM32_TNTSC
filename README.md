@@ -66,7 +66,7 @@ width    |uint16_t|224 |画面横ドット数|
 height   |uint16_t|216 |画面縦ドット数| 
 vram_size|uint16_t|6048|フレームバッファサイズ(バイト)|
 
-###メンバー関数
+###パブリックメンバー関数
 ####NTSCビデオ出力開始
 
 - 書式  
@@ -146,3 +146,53 @@ vram_size|uint16_t|6048|フレームバッファサイズ(バイト)|
  画面の表示内容を高速に更新する場合、最低1フレーム分の表示待ちを行うことで  
  チラつきにない更新を行うことが出来ます.  
  1フレームは約1/60秒(16.7ミリ秒)に相当します.  
+ 
+####サンプルスケッチ
+ 
+```
+#include <TNTSC.h>
+#include <misakiUTF16.h>  // 美咲フォントライブラリ
+   
+// フォント描画
+void drawFont(int x, int y, uint8_t* font) {
+  uint8_t* ptr = &TNTSC.VRAM()[y*(TNTSC.width/8)*8+x];
+  for (int i=0; i<8; i++) {
+    *ptr = *font;
+    ptr+=(TNTSC.width/8);
+    font++;
+  }
+}
+
+// 文字列描画
+void drawText(int x, int y, char* str) {
+  uint8_t  fnt[8];
+  while(*str) {
+    if (x>=(TNTSC.width/8))
+      break;
+    if (! (str = getFontData(fnt, str)) )  {
+         Serial.println("Error"); 
+         break;
+    }
+    drawFont(x,y ,fnt);
+    x++;
+  }  
+}
+
+void setup(){
+  TNTSC.begin();
+
+  // 画面表示
+  TNTSC.cls();
+  drawText(0, 0,"左上");drawText((TNTSC.width/8)-2, 0,"右上");
+  drawText(0,(TNTSC.height/8)-1,"左下");drawText((TNTSC.width/8)-2,(TNTSC.height/8)-1,"右下");
+  drawText(3,4,"■■ＳＴＭ３２ボードでＮＴＳＣ出力テスト■■");
+  drawText(8,7,"ねこにコ・ン・バ・ン・ワ");
+  drawText(6,9,"解像度は２２４ｘ２１６ドットです");
+  drawText(7,13,"まだまだ色々と調整中です^^");
+
+}
+
+void loop(){
+  
+}
+```
