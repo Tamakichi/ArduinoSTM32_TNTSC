@@ -196,8 +196,8 @@ void TNTSC_class::cls() {
 // フレーム間待ち
 void TNTSC_class::delay_frame(uint16_t x) {
   while (x) {
-    while (count != _height+NTSC_VTOP);
-    while (count == _height+NTSC_VTOP);
+    while (count != _ntscHeight + NTSC_VTOP);
+    while (count == _ntscHeight + NTSC_VTOP);
     x--;
   }
 }
