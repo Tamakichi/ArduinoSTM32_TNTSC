@@ -15,7 +15,15 @@ width			KEYWORD2
 height			KEYWORD2
 vram_size		KEYWORD2
 delay_frame		KEYWORD2
-
+screen			KEYWORD2
+setBktmStartHook	KEYWORD2
+setBktmEndHook		KEYWORD2
 #######################################
 # Constants (LITERAL1)
 #######################################
+SC_112x108		LITERAL1
+SC_224x108		LITERAL1
+SC_224x216		LITERAL1
+SC_448x108		LITERAL1
+SC_448x216		LITERAL1
+
