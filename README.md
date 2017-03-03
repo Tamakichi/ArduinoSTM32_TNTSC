@@ -47,8 +47,10 @@ TNTSCフォルダを各自のArduino STM32インストール先のライブラ�
 (Arduino用 美咲フォントライブラリ 教育漢字・内部フラッシュメモリ乗せ版)  
  https://github.com/Tamakichi/Arduino-misakiUTF16  
  
- **実行結果**  
- ![実行結果](./image/05.jpg)  
+ **実行結果**   
+ 画面解像度を5秒間隔で変更してデモメッセージを表示します.  
+ ![実行結果](./image/05.jpg) ![実行結果](./image/06.jpg)  
+ ![実行結果](./image/07.jpg) ![実行結果](./image/08.jpg)  
  ![実行結果](./image/09.jpg)  
 
 ## ライブラリリファレンス
