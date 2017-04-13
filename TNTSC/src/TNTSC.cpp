@@ -45,7 +45,7 @@ const SCREEN_SETUP screen_type[] {
   { 256,  96, 192, 32, 1, SPI_CLOCK_DIV8  }, // 256x96 
   { 256, 192, 192, 32, 0, SPI_CLOCK_DIV8  }, // 256x192
   { 512,  96, 192, 64, 1, SPI_CLOCK_DIV4  }, // 512x96 
-  { 512, 216, 192, 64, 0, SPI_CLOCK_DIV4  }, // 512x192 
+  { 512, 192, 192, 64, 0, SPI_CLOCK_DIV4  }, // 512x192 
   { 128, 108, 216, 16, 1, SPI_CLOCK_DIV16 }, // 128x108
   { 256, 108, 216, 32, 1, SPI_CLOCK_DIV8  }, // 256x108 
   { 256, 216, 216, 32, 0, SPI_CLOCK_DIV8  }, // 256x216

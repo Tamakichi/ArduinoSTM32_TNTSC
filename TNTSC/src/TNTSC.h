@@ -25,11 +25,11 @@
 	#define SC_256x192  2 // 256x192
 	#define SC_512x96   3 // 512x96
 	#define SC_512x192  4 // 512x192
-	#define SC_128x108  5 // 128x96
-	#define SC_256x108  6 // 256x96
-	#define SC_256x216  7 // 256x192
-	#define SC_512x108  8 // 512x96
-	#define SC_512x216  9 // 512x192
+	#define SC_128x108  5 // 128x108
+	#define SC_256x108  6 // 256x108
+	#define SC_256x216  7 // 256x216
+	#define SC_512x108  8 // 512x108
+	#define SC_512x216  9 // 512x216
     #define SC_DEFAULT  SC_256x192
 #endif
 
