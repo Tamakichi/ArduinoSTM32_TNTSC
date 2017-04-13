@@ -4,7 +4,7 @@
 // 更新日 2017/02/27, delay_frame()の追加
 // 更新日 2017/02/27, フック登録関数追加
 // 更新日 2017/03/03, 解像度モード追加
-//
+// 更新日 2017/04/05, クロック48MHz対応
 
 #include <TNTSC.h>
 #include <SPI.h>
@@ -23,11 +23,13 @@ typedef struct  {
   uint16_t width;   // 画面横ドット数
   uint16_t height;  // 画面縦ドット数
   uint16_t ntscH;   // NTSC画面縦ドット数
-  uint16_t hsize;   // 縦バイト数
+  uint16_t hsize;   // 横バイト数
   uint8_t  flgHalf; // 縦走査線数 (0:通常 1:半分)
   uint32_t spiDiv;  // SPIクロック分周
 } SCREEN_SETUP;
 
+#if F_CPU == 72000000L
+#define NTSC_TIMER_DIV 3 // システムクロック分周 1/3
 const SCREEN_SETUP screen_type[] {
   { 112, 108, 216, 14, 1, SPI_CLOCK_DIV32 }, // 112x108
   { 224, 108, 216, 28, 1, SPI_CLOCK_DIV16 }, // 224x108 
@@ -35,6 +37,22 @@ const SCREEN_SETUP screen_type[] {
   { 448, 108, 216, 56, 1, SPI_CLOCK_DIV8  }, // 448x108 
   { 448, 216, 216, 56, 0, SPI_CLOCK_DIV8  }, // 448x216 
 };
+
+#else if  F_CPU == 48000000L
+#define NTSC_TIMER_DIV 2 // システムクロック分周 1/2
+const SCREEN_SETUP screen_type[] {
+  { 128,  96, 192, 16, 1, SPI_CLOCK_DIV16 }, // 128x96
+  { 256,  96, 192, 32, 1, SPI_CLOCK_DIV8  }, // 256x96 
+  { 256, 192, 192, 32, 0, SPI_CLOCK_DIV8  }, // 256x192
+  { 512,  96, 192, 64, 1, SPI_CLOCK_DIV4  }, // 512x96 
+  { 512, 216, 192, 64, 0, SPI_CLOCK_DIV4  }, // 512x192 
+  { 128, 108, 216, 16, 1, SPI_CLOCK_DIV16 }, // 128x108
+  { 256, 108, 216, 32, 1, SPI_CLOCK_DIV8  }, // 256x108 
+  { 256, 216, 216, 32, 0, SPI_CLOCK_DIV8  }, // 256x216
+  { 512, 108, 216, 64, 1, SPI_CLOCK_DIV4  }, // 512x108 
+  { 512, 216, 216, 64, 0, SPI_CLOCK_DIV4  }, // 512x216 
+};
+#endif
 
 #define NTSC_LINE (262+2)                     // 画面構成走査線数(一部のモニタ対応用に2本に追加)
 #define SYNC(V)  gpio_write(PWM_CLK,V)        // 同期信号出力(PWM)
@@ -51,10 +69,29 @@ static uint16_t _height;
 static uint16_t _ntscHeight;
 static uint16_t _vram_size;
 
+// カーソル表示制御用
+static uint16_t cx;        // カーソル横
+static uint16_t cy;        // カーソル縦(ライン)
+static uint8_t flg_cur;    // カーソル表示フラグ
+static uint8_t cur_blink;  // カーソルブリンク間隔
+static uint8_t cur_cnt;    // フレーム表示カウント
+static uint8_t curbuf[64]; // カーソル表示用
+
+
 uint16_t TNTSC_class::width()  {return _width;;} ;
 uint16_t TNTSC_class::height() {return _height;} ;
 uint16_t TNTSC_class::vram_size() { return _vram_size;};
 uint16_t TNTSC_class::screen() { return _screen;};
+
+void TNTSC_class::setCurPos(uint16_t x, uint16_t y) {
+  cx = x;
+  cy = y*8;
+}
+
+void TNTSC_class::showCur(uint8_t flg) {
+  flg_cur = flg;
+}
+	
 
  // ブランキング期間開始フック設定
 void TNTSC_class::setBktmStartHook(void (*func)()) {
@@ -90,15 +127,27 @@ void TNTSC_class::SPI_dmaSend(uint8_t *transmitBuf, uint16_t length) {
 
 // ビデオ用データ表示(ラスタ出力）
 void TNTSC_class::handle_vout() {
-  if (count >=NTSC_VTOP && count <=_ntscHeight+NTSC_VTOP-1) {  
+  if (count >=NTSC_VTOP && count <=_ntscHeight+NTSC_VTOP-1) {  	
+/*
+  	memcpy(curbuf,(uint8_t *)ptr, screen_type[_screen].hsize);
+
+  	if (flg_cur) {
+  		if ( (ptr-vram)/screen_type[_screen].hsize >= cy && (ptr-vram)/screen_type[_screen].hsize <= cy+7) {
+  		   curbuf[cx] ^= 0xff;
+  		} 
+  	} 
+*/
     SPI_dmaSend((uint8_t *)ptr, screen_type[_screen].hsize);
-    if (screen_type[_screen].flgHalf) {
+  	//SPI_dmaSend(curbuf, screen_type[_screen].hsize);
+
+  	if (screen_type[_screen].flgHalf) {
       if ((count-NTSC_VTOP) & 1) 
       ptr+= screen_type[_screen].hsize;
     } else {
       ptr+=screen_type[_screen].hsize;
     }
   }
+	
   // 次の走査線用同期パルス幅設定
   if(count >= NTSC_S_TOP-1 && count <= NTSC_S_END-1){
     // 垂直同期パルス(PWMパルス幅変更)
@@ -123,13 +172,24 @@ void TNTSC_class::handle_vout() {
     count=1;
     ptr = vram;    
   } 
+
+/*
+  if (count >=NTSC_VTOP && count <=_ntscHeight+NTSC_VTOP-1) {  
+	memcpy(curbuf,(uint8_t *)ptr, screen_type[_screen].hsize);
+  	if (flg_cur) {
+  		if ( (ptr-vram)/screen_type[_screen].hsize >= cy && (ptr-vram)/screen_type[_screen].hsize <= cy+7) {
+  		   curbuf[cx] ^= 0xff;
+  		} 
+  	} 
+  }	
+*/
 }
 
 // NTSCビデオ表示開始
 void TNTSC_class::begin(uint8_t mode) {
 
    // スクリーン設定
-   _screen = mode <=4 ? mode: SC_224x216;
+   _screen = mode <=4 ? mode: SC_DEFAULT;
    _width  = screen_type[_screen].width;
    _height = screen_type[_screen].height;   
    _vram_size  = screen_type[_screen].hsize * _height;
@@ -154,9 +214,9 @@ void TNTSC_class::begin(uint8_t mode) {
   
   /// タイマ2の初期設定
   nvic_irq_set_priority(NVIC_TIMER2, IRQ_PRIORITY); // 割り込み優先レベル設定
-  Timer2.pause();                // タイマー停止
-  Timer2.setPrescaleFactor(3);   // システムクロック 72MHzを24MHzに分周 
-  Timer2.setOverflow(1524);      // カウンタ値1524でオーバーフロー発生 63.5us周期
+  Timer2.pause();                             // タイマー停止
+  Timer2.setPrescaleFactor(NTSC_TIMER_DIV);   // システムクロック 72MHzを24MHzに分周 
+  Timer2.setOverflow(1524);                   // カウンタ値1524でオーバーフロー発生 63.5us周期
 
   // +4.7us 水平同期信号出力設定
   pinMode(PWM_CLK,PWM);          // 同期信号出力ピン(PWM)

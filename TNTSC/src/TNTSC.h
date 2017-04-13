@@ -4,22 +4,39 @@
 // 更新日 2017/02/27, delay_frame()の追加、
 // 更新日 2017/02/27, フック登録関数追加
 // 更新日 2017/03/03, 解像度モード追加
+// 更新日 2017/04/05, クロック48MHz対応
 //
 
 #ifndef __TNTSC_H__
 #define __TNTSC_H__
 
 #include <Arduino.h>
-#define SC_112x108  0 // 112x108
-#define SC_224x108  1 // 224x108
-#define SC_224x216  2 // 224x216
-#define SC_448x108  3 // 448x108
-#define SC_448x216  4 // 448x216
+#if F_CPU == 72000000L
+	#define SC_112x108  0 // 112x108
+	#define SC_224x108  1 // 224x108
+	#define SC_224x216  2 // 224x216
+	#define SC_448x108  3 // 448x108
+	#define SC_448x216  4 // 448x216
+    #define SC_DEFAULT  SC_224x216
+
+#else if  F_CPU == 48000000L
+	#define SC_128x96   0 // 128x96
+	#define SC_256x96   1 // 256x96
+	#define SC_256x192  2 // 256x192
+	#define SC_512x96   3 // 512x96
+	#define SC_512x192  4 // 512x192
+	#define SC_128x108  5 // 128x96
+	#define SC_256x108  6 // 256x96
+	#define SC_256x216  7 // 256x192
+	#define SC_512x108  8 // 512x96
+	#define SC_512x216  9 // 512x192
+    #define SC_DEFAULT  SC_256x192
+#endif
 
 // ntscビデオ表示クラス定義
 class TNTSC_class {    
   public:
-    void begin(uint8_t mode=SC_224x216);   // NTSCビデオ表示開始
+    void begin(uint8_t mode=SC_DEFAULT);   // NTSCビデオ表示開始
     void end();                            // NTSCビデオ表示終了 
     uint8_t*  VRAM();                      // VRAMアドレス取得
     void cls();                            // 画面クリア
@@ -32,6 +49,9 @@ class TNTSC_class {
     uint16_t vram_size();
     uint16_t screen();
     
+	void setCurPos(uint16_t x, uint16_t y);
+	void showCur(uint8_t flg);
+	
   private:
     static void handle_vout();
     static void SPI_dmaSend(uint8_t *transmitBuf, uint16_t length) ;
