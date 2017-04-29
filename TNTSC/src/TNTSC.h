@@ -5,6 +5,7 @@
 // 更新日 2017/02/27, フック登録関数追加
 // 更新日 2017/03/03, 解像度モード追加
 // 更新日 2017/04/05, クロック48MHz対応
+// 更新日 2017/04/27, NTSC走査線数補正関数adjust()追加
 //
 
 #ifndef __TNTSC_H__
@@ -48,10 +49,8 @@ class TNTSC_class {
     uint16_t height() ;
     uint16_t vram_size();
     uint16_t screen();
-    
-	void setCurPos(uint16_t x, uint16_t y);
-	void showCur(uint8_t flg);
-	
+	void adjust(int16_t cnt);
+ 
   private:
     static void handle_vout();
     static void SPI_dmaSend(uint8_t *transmitBuf, uint16_t length) ;
