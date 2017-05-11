@@ -6,12 +6,14 @@
 // 更新日 2017/03/03, 解像度モード追加
 // 更新日 2017/04/05, クロック48MHz対応
 // 更新日 2017/04/27, NTSC走査線数補正関数adjust()追加
+// 更新日 2017/04/30, SPI1,SPI2の選択指定を可能に修正
 //
 
 #ifndef __TNTSC_H__
 #define __TNTSC_H__
 
 #include <Arduino.h>
+
 #if F_CPU == 72000000L
 	#define SC_112x108  0 // 112x108
 	#define SC_224x108  1 // 224x108
@@ -37,7 +39,7 @@
 // ntscビデオ表示クラス定義
 class TNTSC_class {    
   public:
-    void begin(uint8_t mode=SC_DEFAULT);   // NTSCビデオ表示開始
+    void begin(uint8_t mode=SC_DEFAULT,uint8_t spino = 1);  // NTSCビデオ表示開始
     void end();                            // NTSCビデオ表示終了 
     uint8_t*  VRAM();                      // VRAMアドレス取得
     void cls();                            // 画面クリア

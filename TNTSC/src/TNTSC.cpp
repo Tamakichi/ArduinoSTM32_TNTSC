@@ -7,18 +7,22 @@
 // 更新日 2017/04/05, クロック48MHz対応
 // 更新日 2017/04/18, SPI割り込みの廃止(動作確認中)
 // 更新日 2017/04/27, NTSC走査線数補正関数追加
+// 更新日 2017/04/30, SPI1,SPI2の選択指定を可能に修正
 
 #include <TNTSC.h>
 #include <SPI.h>
 
 #define gpio_write(pin,val) gpio_write_bit(PIN_MAP[pin].gpio_device, PIN_MAP[pin].gpio_bit, val)
 
-#define PWM_CLK PA1       // 同期信号出力ピン(PWM)
-#define DAT PA7           // 映像信号出力ピン
-#define NTSC_S_TOP 3      // 垂直同期開始ライン
-#define NTSC_S_END 5      // 垂直同期終了ライン
-#define NTSC_VTOP 30      // 映像表示開始ライン
-#define IRQ_PRIORITY  2   // タイマー割り込み優先度
+#define PWM_CLK PA1         // 同期信号出力ピン(PWM)
+#define DAT PA7             // 映像信号出力ピン
+#define NTSC_S_TOP 3        // 垂直同期開始ライン
+#define NTSC_S_END 5        // 垂直同期終了ライン
+#define NTSC_VTOP 30        // 映像表示開始ライン
+#define IRQ_PRIORITY  2     // タイマー割り込み優先度
+#define MYSPI1_DMA_CH DMA_CH3 // SPI1用DMAチャンネル
+#define MYSPI2_DMA_CH DMA_CH5 // SPI2用DMAチャンネル
+#define MYSPI_DMA DMA1        // SPI用DMA
 
 // 画面解像度別パラメタ設定
 typedef struct  {
@@ -72,6 +76,10 @@ static uint16_t _ntscHeight;
 static uint16_t _vram_size;
 static uint16_t _ntsc_line = NTSC_LINE;
 static uint16_t _ntsc_adjust = 0;
+static uint8_t  _spino = 1;
+static dma_channel  _spi_dma_ch = MYSPI1_DMA_CH;
+static dma_dev* _spi_dma    = MYSPI_DMA;
+static SPIClass* pSPI;
 
 uint16_t TNTSC_class::width()  {return _width;;} ;
 uint16_t TNTSC_class::height() {return _height;} ;
@@ -91,24 +99,24 @@ void TNTSC_class::setBktmEndHook(void (*func)()) {
 
 // DMA用割り込みハンドラ(データ出力をクリア)
 void TNTSC_class::DMA1_CH3_handle() {
-  while(SPI.dev()->regs->SR & SPI_SR_BSY);
-    SPI.dev()->regs->DR = 0;
+  while(pSPI->dev()->regs->SR & SPI_SR_BSY);
+    pSPI->dev()->regs->DR = 0;
 }
 
 // DMAを使ったデータ出力
 void TNTSC_class::SPI_dmaSend(uint8_t *transmitBuf, uint16_t length) {
   dma_setup_transfer( 
-    DMA1,DMA_CH3,          // SPI1用DMAチャンネル3を指定
-    &SPI.dev()->regs->DR, // 転送先アドレス    ：SPIデータレジスタを指定
-    DMA_SIZE_8BITS,       // 転送先データサイズ : 1バイト
-    transmitBuf,          // 転送元アドレス     : SRAMアドレス
-    DMA_SIZE_8BITS,       // 転送先データサイズ : 1バイト
-    DMA_MINC_MODE|        // フラグ: サイクリック
-    DMA_FROM_MEM |        //         メモリから周辺機器、転送完了割り込み呼び出しあり 
-    DMA_TRNS_CMPLT        //         転送完了割り込み呼び出しあり  */
+    _spi_dma, _spi_dma_ch,  // SPI1用DMAチャンネル指定
+    &pSPI->dev()->regs->DR, // 転送先アドレス    ：SPIデータレジスタを指定
+    DMA_SIZE_8BITS,         // 転送先データサイズ : 1バイト
+    transmitBuf,            // 転送元アドレス     : SRAMアドレス
+    DMA_SIZE_8BITS,         // 転送先データサイズ : 1バイト
+    DMA_MINC_MODE|          // フラグ: サイクリック
+    DMA_FROM_MEM |          //         メモリから周辺機器、転送完了割り込み呼び出しあり 
+    DMA_TRNS_CMPLT          //         転送完了割り込み呼び出しあり  */
   );
-  dma_set_num_transfers(DMA1, DMA_CH3, length); // 転送サイズ指定
-  dma_enable(DMA1, DMA_CH3);  // DMA有効化
+  dma_set_num_transfers(_spi_dma, _spi_dma_ch, length); // 転送サイズ指定
+  dma_enable(_spi_dma, _spi_dma_ch);  // DMA有効化
 }
 
 // ビデオ用データ表示(ラスタ出力）
@@ -116,7 +124,7 @@ void TNTSC_class::handle_vout() {
   if (count >=NTSC_VTOP && count <=_ntscHeight+NTSC_VTOP-1) {  	
 
     SPI_dmaSend((uint8_t *)ptr, screen_type[_screen].hsize);
-  	//SPI.dmaSend((uint8_t *)ptr, screen_type[_screen].hsize,1);
+  	//pSPI->dmaSend((uint8_t *)ptr, screen_type[_screen].hsize,1);
   	if (screen_type[_screen].flgHalf) {
       if ((count-NTSC_VTOP) & 1) 
       ptr+= screen_type[_screen].hsize;
@@ -148,32 +156,45 @@ void TNTSC_class::adjust(int16_t cnt) {
 }
 	
 // NTSCビデオ表示開始
-void TNTSC_class::begin(uint8_t mode) {
-
+//void TNTSC_class::begin(uint8_t mode) {
+void TNTSC_class::begin(uint8_t mode, uint8_t spino) {
    // スクリーン設定
    _screen = mode <=4 ? mode: SC_DEFAULT;
    _width  = screen_type[_screen].width;
    _height = screen_type[_screen].height;   
    _vram_size  = screen_type[_screen].hsize * _height;
    _ntscHeight = screen_type[_screen].ntscH;
- 	
+   _spino = spino;
+	
   vram = (uint8_t*)malloc(_vram_size);  // ビデオ表示フレームバッファ
    cls();
    ptr = vram;  // ビデオ表示用フレームバッファ参照ポインタ
    count = 1;
 
   // SPIの初期化・設定
-  SPI.begin(); 
-  SPI.setBitOrder(MSBFIRST);  // データ並びは上位ビットが先頭
-  SPI.setDataMode(SPI_MODE3); // MODE3(MODE1でも可)
-  SPI.setClockDivider(screen_type[_screen].spiDiv); // クロックをシステムクロック72MHzの1/16に設定
-
-  SPI.dev()->regs->CR1 |=SPI_CR1_BIDIMODE_1_LINE|SPI_CR1_BIDIOE; // 送信のみ利用の設定
+  if (spino == 2) {
+    pSPI = new SPIClass(2);
+    _spi_dma    = MYSPI_DMA;
+    _spi_dma_ch = MYSPI2_DMA_CH;
+  } else {
+    pSPI = &SPI;
+    _spi_dma    = MYSPI_DMA;
+    _spi_dma_ch = MYSPI1_DMA_CH;
+  };
+  pSPI->begin(); 
+  pSPI->setBitOrder(MSBFIRST);  // データ並びは上位ビットが先頭
+  pSPI->setDataMode(SPI_MODE3); // MODE3(MODE1でも可)
+	if (_spino == 2) {
+      pSPI->setClockDivider(screen_type[_screen].spiDiv-1); // クロックをシステムクロック36MHzの1/8に設定
+	} else {
+      pSPI->setClockDivider(screen_type[_screen].spiDiv);    // クロックをシステムクロック72MHzの1/16に設定
+	}
+	pSPI->dev()->regs->CR1 |=SPI_CR1_BIDIMODE_1_LINE|SPI_CR1_BIDIOE; // 送信のみ利用の設定
 
   // SPIデータ転送用DMA設定
-  dma_init(DMA1);
-  dma_attach_interrupt(DMA1, DMA_CH3, &DMA1_CH3_handle);
-  spi_tx_dma_enable(SPI.dev());  
+  dma_init(_spi_dma);
+  dma_attach_interrupt(_spi_dma, _spi_dma_ch, &DMA1_CH3_handle);
+  spi_tx_dma_enable(pSPI->dev());  
   
   /// タイマ2の初期設定
   nvic_irq_set_priority(NVIC_TIMER2, IRQ_PRIORITY); // 割り込み優先レベル設定
@@ -200,10 +221,13 @@ void TNTSC_class::begin(uint8_t mode) {
 void TNTSC_class::end() {
   Timer2.pause();
   Timer2.detachInterrupt(1);
-  spi_tx_dma_disable(SPI.dev());  
-  dma_detach_interrupt(DMA1, DMA_CH3);
-  SPI.end();
+  spi_tx_dma_disable(pSPI->dev());  
+  dma_detach_interrupt(_spi_dma, _spi_dma_ch);
+  pSPI->end();
   free(vram);
+  if (_spino == 2) {
+  	pSPI->~SPIClass();
+  }	
 }
 
 // VRAMアドレス取得
