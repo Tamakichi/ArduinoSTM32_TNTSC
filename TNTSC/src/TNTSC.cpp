@@ -76,6 +76,8 @@ static uint16_t _ntscHeight;
 static uint16_t _vram_size;
 static uint16_t _ntsc_line = NTSC_LINE;
 static uint16_t _ntsc_adjust = 0;
+static uint16_t _hAdjust = 0; // 横表示位置補正
+static uint16_t _vAdjust = 0; // 縦表示位置補正
 static uint8_t  _spino = 1;
 static dma_channel  _spi_dma_ch = MYSPI1_DMA_CH;
 static dma_dev* _spi_dma    = MYSPI_DMA;
@@ -121,7 +123,7 @@ void TNTSC_class::SPI_dmaSend(uint8_t *transmitBuf, uint16_t length) {
 
 // ビデオ用データ表示(ラスタ出力）
 void TNTSC_class::handle_vout() {
-  if (count >=NTSC_VTOP && count <=_ntscHeight+NTSC_VTOP-1) {  	
+  if (count >=NTSC_VTOP+_vAdjust && count <=_ntscHeight+NTSC_VTOP+_vAdjust-1) {  	
 
     SPI_dmaSend((uint8_t *)ptr, screen_type[_screen].hsize);
   	//pSPI->dmaSend((uint8_t *)ptr, screen_type[_screen].hsize,1);
@@ -150,13 +152,14 @@ void TNTSC_class::handle_vout() {
 
 }
 
-void TNTSC_class::adjust(int16_t cnt) {
+void TNTSC_class::adjust(int16_t cnt, int16_t hcnt, int16_t vcnt) {
   _ntsc_adjust = cnt;
   _ntsc_line = NTSC_LINE+cnt;
+  _hAdjust = hcnt;
+  _vAdjust = vcnt;
 }
 	
 // NTSCビデオ表示開始
-//void TNTSC_class::begin(uint8_t mode) {
 void TNTSC_class::begin(uint8_t mode, uint8_t spino, uint8_t* extram) {
    // スクリーン設定
    _screen = mode <=4 ? mode: SC_DEFAULT;
@@ -214,7 +217,7 @@ void TNTSC_class::begin(uint8_t mode, uint8_t spino, uint8_t* extram) {
   pwmWrite(PWM_CLK, 112);        // パルス幅を4.7usに設定(仮設定)
   
   // +9.4us 映像出力用 割り込みハンドラ登録
-  Timer2.setCompare(1, 225-60);  // オーバーヘッド分等の差し引き
+  Timer2.setCompare(1, 225-60+_hAdjust);  // オーバーヘッド分等の差し引き
   Timer2.setMode(1,TIMER_OUTPUTCOMPARE);
   Timer2.attachInterrupt(1, handle_vout);   
 
