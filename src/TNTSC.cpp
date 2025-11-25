@@ -12,8 +12,7 @@
 
 #include <TNTSC.h>
 #include <SPI.h>
-
-#define gpio_write(pin,val) gpio_write_bit(PIN_MAP[pin].gpio_device, PIN_MAP[pin].gpio_bit, val)
+#include "TNTSC_HAL.h"
 
 #define PWM_CLK PA1         // 同期信号出力ピン(PWM)
 #define DAT PA7             // 映像信号出力ピン
@@ -61,7 +60,8 @@ const SCREEN_SETUP screen_type[] __FLASH__ {
 #endif
 
 #define NTSC_LINE (262+0)                     // 画面構成走査線数(一部のモニタ対応用に2本に追加)
-#define SYNC(V)  gpio_write(PWM_CLK,V)        // 同期信号出力(PWM)
+// SYNC 出力は HAL を通して行う
+#define SYNC(V)  hal_gpio_write(PWM_CLK,V)        // 同期信号出力(PWM)
 static uint8_t* vram;                         // ビデオ表示フレームバッファ
 static volatile uint8_t* ptr;                 // ビデオ表示フレームバッファ参照用ポインタ
 static volatile int count=1;                  // 走査線を数える変数
@@ -101,24 +101,15 @@ void TNTSC_class::setBktmEndHook(void (*func)()) {
 
 // DMA用割り込みハンドラ(データ出力をクリア)
 void TNTSC_class::DMA1_CH3_handle() {
-  while(pSPI->dev()->regs->SR & SPI_SR_BSY);
-    pSPI->dev()->regs->DR = 0;
+  hal_spi_wait_tx_complete_and_clear(pSPI);
 }
 
 // DMAを使ったデータ出力
 void TNTSC_class::SPI_dmaSend(uint8_t *transmitBuf, uint16_t length) {
-  dma_setup_transfer( 
-    _spi_dma, _spi_dma_ch,  // SPI1用DMAチャンネル指定
-    &pSPI->dev()->regs->DR, // 転送先アドレス    ：SPIデータレジスタを指定
-    DMA_SIZE_8BITS,         // 転送先データサイズ : 1バイト
-    transmitBuf,            // 転送元アドレス     : SRAMアドレス
-    DMA_SIZE_8BITS,         // 転送先データサイズ : 1バイト
-    DMA_MINC_MODE|          // フラグ: サイクリック
-    DMA_FROM_MEM |          //         メモリから周辺機器、転送完了割り込み呼び出しあり 
-    DMA_TRNS_CMPLT          //         転送完了割り込み呼び出しあり  */
-  );
-  dma_set_num_transfers(_spi_dma, _spi_dma_ch, length); // 転送サイズ指定
-  dma_enable(_spi_dma, _spi_dma_ch);  // DMA有効化
+  hal_dma_setup_transfer(_spi_dma, _spi_dma_ch, &pSPI->dev()->regs->DR, DMA_SIZE_8BITS, transmitBuf, DMA_SIZE_8BITS,
+    DMA_MINC_MODE | DMA_FROM_MEM | DMA_TRNS_CMPLT);
+  hal_dma_set_num_transfers(_spi_dma, _spi_dma_ch, length);
+  hal_dma_enable(_spi_dma, _spi_dma_ch);
 }
 
 // ビデオ用データ表示(ラスタ出力）
@@ -138,10 +129,10 @@ void TNTSC_class::handle_vout() {
   // 次の走査線用同期パルス幅設定
   if(count >= NTSC_S_TOP-1 && count <= NTSC_S_END-1){
     // 垂直同期パルス(PWMパルス幅変更)
-    TIMER2->regs.adv->CCR2 = 1412;
+    hal_timer_set_ccr(2, 1412);
   } else {
     // 水平同期パルス(PWMパルス幅変更)
-    TIMER2->regs.adv->CCR2 = 112;
+    hal_timer_set_ccr(2, 112);
   }
 
    count++; 
@@ -181,64 +172,55 @@ void TNTSC_class::begin(uint8_t mode, uint8_t spino, uint8_t* extram) {
    count = 1;
 
   // SPIの初期化・設定
-  if (spino == 2) {
-    pSPI = new SPIClass(2);
-    _spi_dma    = MYSPI_DMA;
-    _spi_dma_ch = MYSPI2_DMA_CH;
+  // SPI の初期化・設定 (HAL 経由)
+  pSPI = hal_spi_begin(spino);
+  _spi_dma    = MYSPI_DMA;
+  _spi_dma_ch = (spino == 2) ? MYSPI2_DMA_CH : MYSPI1_DMA_CH;
+  hal_spi_setBitOrder(pSPI, MSBFIRST);
+  hal_spi_setDataMode(pSPI, SPI_MODE3);
+  if (_spino == 2) {
+      hal_spi_setClockDivider(pSPI, screen_type[_screen].spiDiv-1);
   } else {
-    pSPI = &SPI;
-    _spi_dma    = MYSPI_DMA;
-    _spi_dma_ch = MYSPI1_DMA_CH;
-  };
-  pSPI->begin(); 
-  pSPI->setBitOrder(MSBFIRST);  // データ並びは上位ビットが先頭
-  pSPI->setDataMode(SPI_MODE3); // MODE3(MODE1でも可)
-	if (_spino == 2) {
-      pSPI->setClockDivider(screen_type[_screen].spiDiv-1); // クロックをシステムクロック36MHzの1/8に設定
-	} else {
-      pSPI->setClockDivider(screen_type[_screen].spiDiv);    // クロックをシステムクロック72MHzの1/16に設定
-	}
-	pSPI->dev()->regs->CR1 |=SPI_CR1_BIDIMODE_1_LINE|SPI_CR1_BIDIOE; // 送信のみ利用の設定
+      hal_spi_setClockDivider(pSPI, screen_type[_screen].spiDiv);
+  }
+  pSPI->dev()->regs->CR1 |= SPI_CR1_BIDIMODE_1_LINE | SPI_CR1_BIDIOE; // 送信のみ利用の設定
 
   // SPIデータ転送用DMA設定
-  dma_init(_spi_dma);
-  dma_attach_interrupt(_spi_dma, _spi_dma_ch, &DMA1_CH3_handle);
-  spi_tx_dma_enable(pSPI->dev());  
+  hal_dma_init(_spi_dma);
+  hal_dma_attach_interrupt(_spi_dma, _spi_dma_ch, &DMA1_CH3_handle);
+  hal_spi_enable_tx_dma(pSPI);
   
   /// タイマ2の初期設定
-  nvic_irq_set_priority(NVIC_TIMER2, IRQ_PRIORITY); // 割り込み優先レベル設定
-  Timer2.pause();                             // タイマー停止
-  Timer2.setPrescaleFactor(NTSC_TIMER_DIV);   // システムクロック 72MHzを24MHzに分周 
-  Timer2.setOverflow(1524);                   // カウンタ値1524でオーバーフロー発生 63.5us周期
+  hal_nvic_set_priority(NVIC_TIMER2, IRQ_PRIORITY); // 割り込み優先レベル設定
+  hal_timer_pause();                             // タイマー停止
+  hal_timer_set_prescale(NTSC_TIMER_DIV);   // システムクロック 72MHzを24MHzに分周 
+  hal_timer_set_overflow(1524);                   // カウンタ値1524でオーバーフロー発生 63.5us周期
 
   // +4.7us 水平同期信号出力設定
-  pinMode(PWM_CLK,PWM);          // 同期信号出力ピン(PWM)
-  timer_cc_set_pol(TIMER2,2,1);  // 出力をアクティブLOWに設定
-  pwmWrite(PWM_CLK, 112);        // パルス幅を4.7usに設定(仮設定)
+  hal_pinMode(PWM_CLK, PWM);          // 同期信号出力ピン(PWM)
+  hal_timer_set_pwm_pol(TIMER2,2,1);  // 出力をアクティブLOWに設定
+  hal_pwm_write(PWM_CLK, 112);        // パルス幅を4.7usに設定(仮設定)
   
   // +9.4us 映像出力用 割り込みハンドラ登録
-  Timer2.setCompare(1, 225-60+_hAdjust);  // オーバーヘッド分等の差し引き
-  Timer2.setMode(1,TIMER_OUTPUTCOMPARE);
-  Timer2.attachInterrupt(1, handle_vout);   
+  hal_timer_set_compare(1, 225-60+_hAdjust);  // オーバーヘッド分等の差し引き
+  hal_timer_set_mode(1, TIMER_OUTPUTCOMPARE);
+  hal_timer_attach_interrupt(1, handle_vout);
 
-  Timer2.setCount(0);
-  Timer2.refresh();       // タイマーの更新
-  Timer2.resume();        // タイマースタート  
+  hal_timer_set_count(0);
+  hal_timer_refresh();       // タイマーの更新
+  hal_timer_resume();        // タイマースタート  
 }
 
 // NTSCビデオ表示終了
 void TNTSC_class::end() {
-  Timer2.pause();
-  Timer2.detachInterrupt(1);
-  spi_tx_dma_disable(pSPI->dev());  
-  dma_detach_interrupt(_spi_dma, _spi_dma_ch);
-  pSPI->end();
+  hal_timer_pause();
+  hal_timer_detach_interrupt(1);
+  hal_spi_disable_tx_dma(pSPI);
+  hal_dma_detach_interrupt(_spi_dma, _spi_dma_ch);
+  hal_spi_end(pSPI, _spino);
   if (!flgExtVram)
      free(vram);
-  if (_spino == 2) {
-  	delete pSPI;
-  	//pSPI->~SPIClass();
-  }	
+  // pSPI の解放は hal_spi_end が担当
 }
 
 // VRAMアドレス取得
